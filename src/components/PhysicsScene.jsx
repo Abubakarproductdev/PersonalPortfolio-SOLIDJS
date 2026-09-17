@@ -141,8 +141,12 @@ export default function PhysicsScene(props) {
 
       let hasReported = false;
       let lastTime;
+      let isVisible = true;
+      let isRunning = false;
 
       const animate = (time) => {
+        if (!isRunning) return;
+
         const delta = lastTime ? Math.min((time - lastTime) / 1000, 1 / 30) : 1 / 60;
         lastTime = time;
 
@@ -170,9 +174,39 @@ export default function PhysicsScene(props) {
         frame = requestAnimationFrame(animate);
       };
 
-      frame = requestAnimationFrame(animate);
+      const startLoop = () => {
+        if (isRunning) return;
+        isRunning = true;
+        lastTime = performance.now();
+        frame = requestAnimationFrame(animate);
+      };
+
+      const stopLoop = () => {
+        isRunning = false;
+        if (frame) {
+          cancelAnimationFrame(frame);
+          frame = 0;
+        }
+      };
+
+      const intersectionObserver = new IntersectionObserver(
+        ([entry]) => {
+          isVisible = entry.isIntersecting;
+          if (isVisible) {
+            startLoop();
+          } else {
+            stopLoop();
+          }
+        },
+        { rootMargin: "200px" },
+      );
+
+      intersectionObserver.observe(host);
+      startLoop();
 
       onCleanup(() => {
+        stopLoop();
+        intersectionObserver.disconnect();
         window.removeEventListener("pointermove", handlePointerMove);
         world.removeBody(pointerBody);
         baubles.forEach(({ body, mesh }) => {

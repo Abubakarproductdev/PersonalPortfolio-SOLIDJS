@@ -1,20 +1,15 @@
-const CACHE_NAME = "portfolio-assets-v1";
+const CACHE_NAME = "portfolio-assets-v2";
 const FRAME_COUNT = 192;
 const frameUrl = (index) => `/frames/${String(index).padStart(5, "0")}_compressed.webp`;
 
 const CORE_ASSETS = [
   "/",
   "/frames/00001_compressed.webp",
-  "/nextjs.jpg",
-  "/react.jpg",
-  "/python.jpg",
-  "/javascript.jpg",
-  "/html.png",
-  "/tailwind.jpg",
-  "/nodejs.jpg",
-  "/expressjs.jpg",
-  "/mongodb.jpg",
-  "/adamsbridge.hdr",
+  "/sivo.webp",
+  "/agri.webp",
+  "/stra.webp",
+  "/startup.webp",
+  "/e.webp",
 ];
 
 self.addEventListener("install", (event) => {

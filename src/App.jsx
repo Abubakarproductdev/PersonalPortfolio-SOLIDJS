@@ -4,7 +4,16 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import ScrollStack, { ScrollStackItem } from "./components/ScrollStack";
 import Reveal from "./components/Reveal";
 import { createScrollProgress } from "./hooks/createScrollProgress";
-import { FRAME_COUNT, getFrameSrc, PHYSICS_TEXTURES } from "./lib/homePreload";
+import {
+  FRAME_COUNT,
+  PHYSICS_TEXTURES,
+  frameCache,
+  findClosestLoadedFrame,
+  hasInitiallyLoaded,
+  setHasInitiallyLoaded,
+  initFramesPreload,
+  subscribePreload,
+} from "./lib/homePreload";
 import { projectCards, projectData } from "./data/projectData";
 
 const PhysicsScene = lazy(() => import("./components/PhysicsScene"));
@@ -94,14 +103,14 @@ export default function App() {
 }
 
 function Home() {
-  const [isLoading, setIsLoading] = createSignal(true);
-  const [isFramesLoaded, setIsFramesLoaded] = createSignal(false);
-  const [isComponentsLoaded, setIsComponentsLoaded] = createSignal(false);
-  const [isPhysicsLoaded, setIsPhysicsLoaded] = createSignal(false);
-  const [isWindowLoaded, setIsWindowLoaded] = createSignal(document.readyState === "complete");
+  const isReturning = hasInitiallyLoaded;
+  const [isLoading, setIsLoading] = createSignal(!isReturning);
+  const [isFramesLoaded, setIsFramesLoaded] = createSignal(isReturning);
+  const [isComponentsLoaded, setIsComponentsLoaded] = createSignal(isReturning);
+  const [isPhysicsLoaded, setIsPhysicsLoaded] = createSignal(isReturning);
   const [showPhysicsScene, setShowPhysicsScene] = createSignal(false);
-  const [loadingProgress, setLoadingProgress] = createSignal(0);
-  const [loadingStatus, setLoadingStatus] = createSignal("Preparing");
+  const [loadingProgress, setLoadingProgress] = createSignal(isReturning ? 100 : 0);
+  const [loadingStatus, setLoadingStatus] = createSignal(isReturning ? "Ready" : "Preparing");
   const [isMobile, setIsMobile] = createSignal(false);
   let canvas;
   let container;
@@ -111,7 +120,6 @@ function Home() {
   let currentFrameIndex = 0;
   let pendingFrameSource = null;
   let canvasMetrics = { width: 0, height: 0 };
-  const images = new Array(FRAME_COUNT).fill(null);
   const scrollProgress = createScrollProgress(() => container);
 
   const resizeCanvas = () => {
@@ -139,9 +147,11 @@ function Home() {
     if (!ctx) return;
 
     const { width, height } = canvasMetrics;
-    const ratio = Math.max(width / img.width, height / img.height);
-    const newWidth = img.width * ratio;
-    const newHeight = img.height * ratio;
+    const imgWidth = img.width || 1920;
+    const imgHeight = img.height || 1080;
+    const ratio = Math.max(width / imgWidth, height / imgHeight);
+    const newWidth = imgWidth * ratio;
+    const newHeight = imgHeight * ratio;
     const offsetX = (width - newWidth) / 2;
     const offsetY = (height - newHeight) / 2;
 
@@ -160,38 +170,6 @@ function Home() {
     });
   };
 
-  const findLoadedFrame = (targetIndex) => {
-    if (images[targetIndex]?.complete) return images[targetIndex];
-
-    for (let distance = 1; distance < FRAME_COUNT; distance += 1) {
-      const before = targetIndex - distance;
-      const after = targetIndex + distance;
-
-      if (before >= 0 && images[before]?.complete) return images[before];
-      if (after < FRAME_COUNT && images[after]?.complete) return images[after];
-    }
-
-    return null;
-  };
-
-  const preloadImage = (src) =>
-    new Promise((resolve) => {
-      const img = new Image();
-      img.decoding = "async";
-      img.loading = "eager";
-      img.fetchPriority = "high";
-      const finish = () => resolve(img);
-      img.onload = () => {
-        if (typeof img.decode === "function") {
-          img.decode().catch(() => {}).finally(finish);
-          return;
-        }
-        finish();
-      };
-      img.onerror = () => resolve(null);
-      img.src = src;
-    });
-
   createEffect(() => {
     if (isLoading()) {
       document.documentElement.style.overflow = "hidden";
@@ -204,30 +182,22 @@ function Home() {
   });
 
   createEffect(() => {
-    if (isFramesLoaded() && isComponentsLoaded() && isPhysicsLoaded() && isWindowLoaded()) {
+    if (isFramesLoaded() && isComponentsLoaded() && isPhysicsLoaded()) {
+      setHasInitiallyLoaded(true);
       const timer = setTimeout(() => {
         setIsLoading(false);
         window.scrollTo(0, 0);
-      }, 350);
+      }, 150);
       onCleanup(() => clearTimeout(timer));
     }
   });
 
   createEffect(() => {
     const progress = scrollProgress();
-    let nextFrameIndex = 0;
-
-    if (progress < 0.33) {
-      nextFrameIndex = Math.floor((progress / 0.33) * 79);
-    } else if (progress < 0.66) {
-      nextFrameIndex = 79 + Math.floor(((progress - 0.33) / 0.33) * 80);
-    } else {
-      nextFrameIndex = 159 + Math.floor(((progress - 0.66) / 0.34) * 32);
-    }
-
-    currentFrameIndex = Math.min(FRAME_COUNT - 1, Math.max(0, nextFrameIndex));
-    const img = findLoadedFrame(currentFrameIndex);
-    if (img?.complete) queueFrameDraw(img);
+    const nextFrameIndex = Math.min(FRAME_COUNT - 1, Math.max(0, Math.floor(progress * (FRAME_COUNT - 1))));
+    currentFrameIndex = nextFrameIndex;
+    const frame = findClosestLoadedFrame(currentFrameIndex);
+    if (frame) queueFrameDraw(frame);
   });
 
   onMount(() => {
@@ -242,19 +212,13 @@ function Home() {
       mobileQuery.addListener?.(updateMobileState);
     }
 
-    if (!isWindowLoaded()) {
-      const handleLoad = () => setIsWindowLoaded(true);
-      window.addEventListener("load", handleLoad, { once: true });
-      onCleanup(() => window.removeEventListener("load", handleLoad));
-    }
-
     const fallbackTimer = setTimeout(() => {
       setIsFramesLoaded(true);
       setIsComponentsLoaded(true);
       setIsPhysicsLoaded(true);
       setLoadingProgress(100);
-      setLoadingStatus("Starting");
-    }, 30000);
+      setLoadingStatus("Ready");
+    }, 3000);
 
     setShowPhysicsScene(!mobileQuery.matches);
     if (mobileQuery.matches) {
@@ -273,76 +237,38 @@ function Home() {
       }
     };
 
-    const loadFrame = async (index) => {
-      const img = await preloadImage(getFrameSrc(index));
-      if (cancelled) return null;
-      images[index - 1] = img;
-      return img;
-    };
+    const unsubscribe = subscribePreload(({ progress, done }) => {
+      if (cancelled) return;
+      if (done) setIsFramesLoaded(true);
+      setLoadingProgress((prev) => Math.max(prev, progress));
+    });
 
-    const preloadFrames = async () => {
-      setLoadingStatus("Loading frames");
-      const firstFrame = await loadFrame(1);
-      if (firstFrame) {
-        queueFrameDraw(firstFrame);
-        setLoadingProgress(1);
-      }
-
-      const priorityFrames = [16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192];
-      const remainingFrames = Array.from({ length: FRAME_COUNT }, (_, index) => index + 1)
-        .filter((index) => index !== 1)
-        .sort((a, b) => {
-          const aPriority = priorityFrames.includes(a) ? 0 : 1;
-          const bPriority = priorityFrames.includes(b) ? 0 : 1;
-          return aPriority - bPriority || a - b;
-        });
-
-      let loadedCount = firstFrame ? 1 : 0;
-      let nextFrameIndex = 0;
-      const concurrency = mobileQuery.matches ? 6 : 12;
-
-      const workers = Array.from({ length: concurrency }, async () => {
-        while (!cancelled && nextFrameIndex < remainingFrames.length) {
-          const frameIndex = remainingFrames[nextFrameIndex];
-          nextFrameIndex += 1;
-
-          if (!images[frameIndex - 1]) {
-            await loadFrame(frameIndex);
-          }
-
-          loadedCount += 1;
-          setLoadingProgress(Math.min(99, Math.round((loadedCount / FRAME_COUNT) * 100)));
-        }
-      });
-
-      await Promise.all(workers);
-
-      if (!cancelled) {
-        setLoadingProgress(100);
-        setIsFramesLoaded(true);
-        setLoadingStatus("Finalizing");
-      }
-    };
+    initFramesPreload((firstFrame) => {
+      if (cancelled) return;
+      queueFrameDraw(firstFrame);
+      setLoadingProgress(25);
+      setIsFramesLoaded(true);
+    }).catch(() => {
+      if (!cancelled) setIsFramesLoaded(true);
+    });
 
     preloadComponentChunks().catch(() => {
       if (!cancelled) setIsComponentsLoaded(true);
     });
 
-    preloadFrames().catch(() => {
-      if (!cancelled) {
-        setIsFramesLoaded(true);
-        setLoadingStatus("Starting");
-      }
-    });
-
     const handleResize = () => {
       resizeCanvas();
-      const img = findLoadedFrame(currentFrameIndex);
-      if (img?.complete) queueFrameDraw(img);
+      const img = findClosestLoadedFrame(currentFrameIndex);
+      if (img) queueFrameDraw(img);
     };
 
     handleResize();
     window.addEventListener("resize", handleResize);
+
+    if (hasInitiallyLoaded) {
+      const existing = findClosestLoadedFrame(0);
+      if (existing) queueFrameDraw(existing);
+    }
 
     const ctx = gsap.context(() => {
       const leftColumn = waveWrapper.querySelector(".wave-column-left");
@@ -382,18 +308,10 @@ function Home() {
         start: "top bottom",
         end: "bottom top",
         onUpdate: (self) => {
-          const viewportCenter = window.innerHeight / 2;
-          let closestIndex = 0;
-          let minDistance = Infinity;
-
-          leftTexts.forEach((text, index) => {
-            const rect = text.getBoundingClientRect();
-            const distance = Math.abs(rect.top + rect.height / 2 - viewportCenter);
-            if (distance < minDistance) {
-              minDistance = distance;
-              closestIndex = index;
-            }
-          });
+          const closestIndex = Math.min(
+            leftTexts.length - 1,
+            Math.max(0, Math.floor(self.progress * leftTexts.length)),
+          );
 
           const updateColumn = (texts, setters, range, multiplier) => {
             texts.forEach((text, index) => {
@@ -407,7 +325,6 @@ function Home() {
                   scale: 1.05,
                   color: "white",
                   opacity: 1,
-                  textShadow: "0 0 20px rgba(255,255,255,0.4)",
                   duration: 0.2,
                   overwrite: "auto",
                 });
@@ -417,7 +334,6 @@ function Home() {
                   scale: 1,
                   color: "#4d4d4d",
                   opacity: 0.4,
-                  textShadow: "none",
                   duration: 0.2,
                   overwrite: "auto",
                 });
@@ -436,6 +352,7 @@ function Home() {
     onCleanup(() => {
       cancelled = true;
       clearTimeout(fallbackTimer);
+      unsubscribe();
       if (typeof mobileQuery.removeEventListener === "function") {
         mobileQuery.removeEventListener("change", updateMobileState);
       } else {
@@ -567,7 +484,7 @@ function ProjectCard(props) {
     <ScrollStackItem>
       <Link href={`/portfolio/${project.slug}`} class="group mx-auto flex min-h-[58vh] w-[92vw] max-w-6xl cursor-pointer flex-col overflow-hidden rounded-xl border border-white/8 bg-[#111111] transition-all duration-700 hover:border-white/20 md:h-[65vh] md:w-[80vw] md:flex-row md:rounded-2xl md:border-transparent">
         <div class="relative h-44 w-full shrink-0 border-b border-white/10 md:hidden">
-          <img src={project.image} alt={project.title} class="h-full w-full object-cover opacity-60 grayscale transition-all duration-700 group-hover:opacity-100 group-hover:grayscale-0" />
+          <img src={project.image} alt={project.title} loading="lazy" decoding="async" class="h-full w-full object-cover opacity-60 grayscale transition-all duration-700 group-hover:opacity-100 group-hover:grayscale-0" />
         </div>
         <div class="flex flex-1 flex-col justify-center p-5 md:p-12">
           <h2 class="mb-2 text-2xl font-light tracking-[0.16em] text-white/90 uppercase transition-colors duration-700 group-hover:text-white md:mb-4 md:text-6xl md:tracking-widest">
@@ -580,7 +497,7 @@ function ProjectCard(props) {
           </div>
         </div>
         <div class="relative hidden flex-1 border-l border-white/10 md:block">
-          <img src={project.image} alt={project.title} class="h-full w-full object-cover opacity-50 grayscale transition-all duration-700 group-hover:opacity-100 group-hover:grayscale-0" />
+          <img src={project.image} alt={project.title} loading="lazy" decoding="async" class="h-full w-full object-cover opacity-50 grayscale transition-all duration-700 group-hover:opacity-100 group-hover:grayscale-0" />
         </div>
       </Link>
     </ScrollStackItem>

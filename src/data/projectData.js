@@ -105,7 +105,7 @@ By ignoring the standard hand-speed and null-sign advice and building a custom A
 export const projectCards = [
   {
     slug: "sivo",
-    image: "/sivo.png",
+    image: "/sivo.webp",
     title: "SIVO",
     subtitle: "Sign to speech & speech to sign",
     backend: "Python, Flask, TensorFlow",
@@ -113,7 +113,7 @@ export const projectCards = [
   },
   {
     slug: "agrimind",
-    image: "/agri.png",
+    image: "/agri.webp",
     title: "Agrimind",
     subtitle: "AI farmers resource allocation",
     backend: "Python (AI agents), Langgraph, Node.js, MongoDB",
@@ -121,7 +121,7 @@ export const projectCards = [
   },
   {
     slug: "quant",
-    image: "/stra.png",
+    image: "/stra.webp",
     title: "Semi-Quant Auto",
     subtitle: "Future market strategy Automation",
     backend: "Python",
@@ -129,7 +129,7 @@ export const projectCards = [
   },
   {
     slug: "startup",
-    image: "/startup.png",
+    image: "/startup.webp",
     title: "Startup Analyser",
     subtitle: "AI startup analyser using RAG system",
     backend: "Python, Node.js, Express, MongoDB, Redis",
@@ -137,7 +137,7 @@ export const projectCards = [
   },
   {
     slug: "armall",
-    image: "/e.png",
+    image: "/e.webp",
     title: "ArMall.pk",
     subtitle: "Ecommerce website design",
     backend: "Next.js, Mongoose, Clerk, MongoDB",
